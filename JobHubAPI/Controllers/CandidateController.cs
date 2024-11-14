@@ -53,7 +53,7 @@ namespace JobHubAPI.Controllers
                     Comment = dto.Comment
                 };
                 var data = await _candidateServices.CandidateCrudService.InsertAsync(candidate);
-                return Ok(data);
+                return new ResponseModel(200,"Saved Successfully",data);
             }
             catch (Exception ex)
             {
