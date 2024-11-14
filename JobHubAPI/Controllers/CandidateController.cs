@@ -25,8 +25,6 @@ namespace JobHubAPI.Controllers
 
 
         [HttpPost]
-
-        [Route("save")]
         public async Task<ResponseModel> Save(CandidateViewModel dto)
         {
             try
@@ -35,9 +33,10 @@ namespace JobHubAPI.Controllers
                 {
                     return new ResponseModel(500, "success", GetModelErrors(ModelState));
                 }
+                dto.Email=dto.Email.Trim();
                 string pattern = @"^[^@\s]+@[^@\s]+\.[^@\s]+$"; // Email pattern requiring @ and . after it
 
-                if (Regex.IsMatch(dto.Email, pattern))
+                if (!Regex.IsMatch(dto.Email, pattern))
                 {
                     return new ResponseModel(400, "Email is invalid. Email should contain @/.", dto);
                 }
@@ -52,8 +51,8 @@ namespace JobHubAPI.Controllers
                     GitHubProfile = dto.GitHubProfile,
                     Comment = dto.Comment
                 };
-                var data = await _candidateServices.CandidateCrudService.InsertAsync(candidate);
-                return new ResponseModel(200,"Saved Successfully",data);
+                var data = await _candidateServices.CreateOrUpdateCandidateInfo(candidate);
+                return data;
             }
             catch (Exception ex)
             {

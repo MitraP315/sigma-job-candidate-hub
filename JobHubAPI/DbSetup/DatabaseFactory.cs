@@ -17,6 +17,8 @@ namespace JobHubAPI.DbSetup
         Dialect Dialect { get; }
         QueryBuilder QueryBuilder { get; }
         IDbConnection GetConnection();
+
+        ILogger DbLogger { get; set; }
     }
    
 

@@ -22,5 +22,15 @@ namespace JobHubAPI.Crud
             }
             return (TKey)result.First().id;
         }
+        public static Task<int> UpdateAsync(this IDbConnection connection, object entityToUpdate,
+              IDbTransaction transaction = null, int? commandTimeout = null)
+        {
+            IDatabaseFactory factory = connection.GetFactory();
+            var sql = factory.QueryBuilder.Update(entityToUpdate);
+            return connection.ExecuteAsync(new CommandDefinition(sql.QuerySql, sql.Parameters, transaction, commandTimeout));
+
+            //return connection.Execute(sql.QuerySql, sql.Parameters, transaction, commandTimeout);
+
+        }
     }
 }

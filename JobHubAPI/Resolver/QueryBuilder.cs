@@ -1,4 +1,5 @@
-﻿using Dapper;
+﻿
+using Dapper;
 using Microsoft.Extensions.Primitives;
 using System.Collections.Concurrent;
 using System.Reflection;
@@ -34,6 +35,11 @@ namespace JobHubAPI.Context
     public enum JoinType
     {
         InnerJoin, CrossJoin, LeftJoin, RightJoin, LeftOuterJoin, RightOuterJoin
+    }
+
+    [AttributeUsage(AttributeTargets.Property)]
+    public class IgnoreAllAttribute : System.Attribute
+    {
     }
     public class JoinAttribute : System.Attribute
     {
@@ -143,6 +149,10 @@ namespace JobHubAPI.Context
                         break;
                 }
                 string tableName = GetTableName(join.TableName);
+                //[Join(TableName = typeof(Product), At = "{table}.ProductId={self}.ProductId")]
+                //[Join(TableName = typeof(SEO), At = "{table}.ProductId={self}.ProductId")]
+                // $"hello, {name}"
+                // string on= string.Format(join.At,new {table=rootTableName,self=tableName});
                 string on = join.At;
                 sb.AppendFormat("{0} {1}", jointype, tableName);
                 sb.AppendFormat("on {0}", on);
@@ -239,7 +249,70 @@ namespace JobHubAPI.Context
             return GetList<T>(new { });
         }
 
-     
+        public QueryRequest GetPaginatedList<T>(int pageNumber, int rowsPerPage, string conditions, string orderby, object parameters = null)
+        {
+            if (string.IsNullOrEmpty(SqlTemplate.PaginatedSql))
+                throw new Exception("GetListPage is not supported with the current SQL Dialect");
+
+            if (pageNumber < 1)
+                throw new Exception("Page must be greater than 0");
+
+            var currenttype = typeof(T);
+            var idProps = GetIdProperties(currenttype).ToList();
+            if (!idProps.Any())
+                throw new ArgumentException("Entity must have at least one [Key] property");
+            var joins = currenttype.GetTypeInfo().GetCustomAttributes<JoinAttribute>();
+
+            var name = GetTableName(currenttype);
+            var sb = new StringBuilder();
+            var query = SqlTemplate.PaginatedSql;
+            if (string.IsNullOrEmpty(orderby))
+            {
+                orderby = GetColumnName(idProps.First()) + " desc";
+            }
+
+            //create a new empty instance of the type to get the base properties
+            BuildSelect(sb, GetScaffoldableProperties((T)Activator.CreateInstance(typeof(T))).ToArray());
+            query = query.Replace("{SelectColumns}", sb.ToString());
+            query = query.Replace("{TableName}", name);
+            // query = query.Replace("{join}", name);
+            if (!joins.Any())
+            {
+                query = query.Replace("{join}", "");
+            }
+            foreach (var join in joins)
+            {
+                string jointype = "";
+                JoinType type = join.JoinType;
+                switch (type)
+                {
+                    case JoinType.InnerJoin:
+                        jointype = "inner join";
+                        break;
+                }
+                string tableName = GetTableName(join.TableName);
+                //[Join(TableName = typeof(Product), At = "{table}.ProductId={self}.ProductId")]
+                //[Join(TableName = typeof(SEO), At = "{table}.ProductId={self}.ProductId")]
+                // $"hello, {name}"
+                // string on= string.Format(join.At,new {table=rootTableName,self=tableName});
+                string on = join.At;
+                //sb.AppendFormat("{0} {1}", jointype, tableName);
+                //sb.AppendFormat("on {0}", on);
+                query = query.Replace("{join}", jointype + tableName + " on " + on);
+            }
+            query = query.Replace("{PageNumber}", pageNumber.ToString());
+            query = query.Replace("{RowsPerPage}", rowsPerPage.ToString());
+            query = query.Replace("{OrderBy}", orderby);
+            query = query.Replace("{WhereClause}", conditions);
+            query = query.Replace("{Offset}", pageNumber.ToString());
+            //query = query.Replace("{Offset}", ((pageNumber - 1) * rowsPerPage).ToString());
+
+            return new QueryRequest { QuerySql = query, Parameters = parameters };
+            //return connection.Query<T>(query, parameters, transaction, true, commandTimeout);
+        }
+
+
+
         public QueryRequest Insert<TKey>(object entityToInsert)
         {
             var idProps = GetIdProperties(entityToInsert).ToList();
@@ -308,6 +381,122 @@ namespace JobHubAPI.Context
 
         }
 
+        public QueryRequest Insert(object entityToInsert)
+        {
+            return Insert<int?>(entityToInsert);
+        }
+        public QueryRequest Update(object entityToUpdate)
+        {
+            var idProps = GetIdProperties(entityToUpdate).ToList();
+
+            if (!idProps.Any())
+                throw new ArgumentException("Entity must have at least one [Key] or Id property");
+
+            var name = GetTableName(entityToUpdate);
+
+            var sb = new StringBuilder();
+            sb.AppendFormat("update {0}", name);
+
+            sb.AppendFormat(" set ");
+            BuildUpdateSet(entityToUpdate, sb);
+            sb.Append(" where ");
+            BuildWhere(sb, idProps, entityToUpdate);
+
+            return new QueryRequest { QuerySql = sb.ToString(), Parameters = entityToUpdate };
+        }
+
+        public QueryRequest Update(object entityToUpdate, string condition, object parameters)
+        {
+            var idProps = GetIdProperties(entityToUpdate).ToList();
+
+            if (!idProps.Any())
+                throw new ArgumentException("Entity must have at least one [Key] or Id property");
+
+            var name = GetTableName(entityToUpdate);
+
+            var sb = new StringBuilder();
+            sb.AppendFormat("update {0}", name);
+
+            sb.AppendFormat(" set ");
+            BuildUpdateSet(entityToUpdate, sb);
+            sb.Append(condition);
+            //BuildWhere(sb, idProps, entityToUpdate);
+
+            return new QueryRequest { QuerySql = sb.ToString(), Parameters = parameters };
+        }
+
+        public QueryRequest UpdateStatus<T>(object id, object status)
+        {
+            var currenttype = typeof(T);
+            var idProps = GetIdProperties(currenttype).ToList();
+
+            if (!idProps.Any())
+                throw new ArgumentException("Entity must have at least one [Key] or Id property");
+
+            var name = GetTableName(currenttype);
+            var onlyKey = idProps.First();
+            var sb = new StringBuilder();
+            sb.AppendFormat("update {0}", name);
+            sb.AppendFormat("set IsActive =@isActive");
+            sb.Append(" where " + GetColumnName(onlyKey) + " = @Id");
+
+            var dynParms = new DynamicParameters();
+            dynParms.Add("@id", id);
+            dynParms.Add("@isActive", status);
+
+            return new QueryRequest { QuerySql = sb.ToString(), Parameters = dynParms };
+        }
+        public QueryRequest UpdateAsDeleted<T>(object id)
+        {
+            var currenttype = typeof(T);
+            var idProps = GetIdProperties(currenttype).ToList();
+
+            if (!idProps.Any())
+                throw new ArgumentException("Entity must have at least one [Key] or Id property");
+
+            var name = GetTableName(currenttype);
+            var onlyKey = idProps.First();
+            var sb = new StringBuilder();
+            sb.AppendFormat("update {0}", name);
+            sb.AppendFormat("set IsDeleted =@isDeleted,");
+            sb.AppendFormat("IsActive =@isActive");
+            sb.Append(" where " + GetColumnName(onlyKey) + " = @Id");
+
+            var dynParms = new DynamicParameters();
+            dynParms.Add("@id", id);
+            dynParms.Add("@isDeleted", true);
+            dynParms.Add("@isActive", false);
+
+            return new QueryRequest { QuerySql = sb.ToString(), Parameters = dynParms };
+        }
+        /// <summary>
+        /// must send DeletedBy as userid 
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="condition"></param>
+        /// <param name="parameters"></param>
+        /// <returns></returns>
+        public QueryRequest UpdateAsDeleted<T>(string condition, object parameters)
+        {
+            var currenttype = typeof(T);
+            var idProps = GetIdProperties(currenttype).ToList();
+
+            if (!idProps.Any())
+                throw new ArgumentException("Entity must have at least one [Key] or Id property");
+
+            var name = GetTableName(currenttype);
+
+            var sb = new StringBuilder();
+            sb.AppendFormat("update  {0} ", name);
+            sb.AppendFormat("set IsDeleted =1,");
+            sb.AppendFormat("IsActive =0,");
+            sb.AppendFormat("DeletedBy =@DeletedBy,");
+            sb.AppendFormat("DeletedOn =getdate() ");
+            //sb.Append(" where ");
+            sb.Append(condition);
+
+            return new QueryRequest { QuerySql = sb.ToString(), Parameters = parameters };
+        }
         public QueryRequest Delete<T>(T entityToDelete)
         {
             var idProps = GetIdProperties(entityToDelete).ToList();
@@ -368,6 +557,30 @@ namespace JobHubAPI.Context
 
             return new QueryRequest { QuerySql = sb.ToString(), Parameters = dynParms };
         }
+        public QueryRequest Delete<T>(int[] ids)
+        {
+            var currenttype = typeof(T);
+            var idProps = GetIdProperties(currenttype).ToList();
+
+
+            if (!idProps.Any())
+                throw new ArgumentException("Delete<T> only supports an entity with a [Key] or Id property");
+            if (idProps.Count() > 1)
+                throw new ArgumentException("Delete<T> only supports an entity with a single [Key] or Id property");
+
+            var onlyKey = idProps.First();
+            var name = GetTableName(currenttype);
+
+            var sb = new StringBuilder();
+            sb.AppendFormat("Delete from {0}", name);
+            sb.Append(" where " + GetColumnName(onlyKey) + "in  @Ids");
+
+            var param = new { Ids = ids };
+
+            return new QueryRequest { QuerySql = sb.ToString(), Parameters = param };
+        }
+
+
         public QueryRequest DeleteList<T>(object whereConditions)
         {
 
@@ -401,15 +614,58 @@ namespace JobHubAPI.Context
 
             return new QueryRequest { QuerySql = sb.ToString(), Parameters = parameters };
         }
-    
-     
+        public QueryRequest RecordCount<T>(string conditions = "", object parameters = null)
+        {
+            var currenttype = typeof(T);
+            var name = GetTableName(currenttype);
+            var sb = new StringBuilder();
+            sb.Append("Select count(1)");
+            sb.AppendFormat(" from {0}", name);
+            sb.Append(" " + conditions);
+            return new QueryRequest { QuerySql = sb.ToString(), Parameters = parameters };
+        }
+
+
+        public QueryRequest RecordCount<T>(object whereConditions)
+        {
+            var currenttype = typeof(T);
+            var name = GetTableName(currenttype);
+
+            var sb = new StringBuilder();
+            var whereprops = GetAllProperties(whereConditions).ToArray();
+            sb.Append("Select count(1)");
+            sb.AppendFormat(" from {0}", name);
+            if (whereprops.Any())
+            {
+                sb.Append(" where ");
+                BuildWhere(sb, whereprops, (T)Activator.CreateInstance(typeof(T)));
+            }
+            return new QueryRequest { QuerySql = sb.ToString(), Parameters = whereConditions };
+        }
+
+        //build update statement based on list on an entity
+        private void BuildUpdateSet(object entityToUpdate, StringBuilder sb)
+        {
+            var nonIdProps = GetUpdateableProperties(entityToUpdate).ToArray();
+
+            for (var i = 0; i < nonIdProps.Length; i++)
+            {
+                var property = nonIdProps[i];
+
+                sb.AppendFormat("{0} = @{1}", GetColumnName(property), property.Name);
+                if (i < nonIdProps.Length - 1)
+                    sb.AppendFormat(", ");
+            }
+        }
+
+        //build select clause based on list of properties skipping ones with the IgnoreSelect and NotMapped attribute
         private void BuildSelect(StringBuilder sb, IEnumerable<PropertyInfo> props)
         {
             var propertyInfos = props as IList<PropertyInfo> ?? props.ToList();
             var addedAny = false;
             for (var i = 0; i < propertyInfos.Count(); i++)
             {
-                if (propertyInfos.ElementAt(i).GetCustomAttributes(true).Any(attr => attr.GetType().Name == typeof(IgnoreSelectAttribute).Name || attr.GetType().Name == typeof(NotMappedAttribute).Name || attr.GetType().Name == typeof(System.Attribute).Name)) continue;
+                if (propertyInfos.ElementAt(i).GetCustomAttributes(true).Any(attr => attr.GetType().Name == typeof(IgnoreSelectAttribute).Name || attr.GetType().Name == typeof(NotMappedAttribute).Name || attr.GetType().Name == typeof(IgnoreAllAttribute).Name)) continue;
 
                 if (addedAny)
                     sb.Append(",");
@@ -483,7 +739,7 @@ namespace JobHubAPI.Context
                     && property.GetCustomAttributes(true).Any(attr => attr.GetType().Name == typeof(KeyAttribute).Name)
                     && property.GetCustomAttributes(true).All(attr => attr.GetType().Name != typeof(RequiredAttribute).Name))
                     continue;
-                if (property.GetCustomAttributes(true).Any(attr => attr.GetType().Name == typeof(IgnoreInsertAttribute).Name || attr.GetType().Name == typeof(System.Attribute).Name)) continue;
+                if (property.GetCustomAttributes(true).Any(attr => attr.GetType().Name == typeof(IgnoreInsertAttribute).Name || attr.GetType().Name == typeof(IgnoreAllAttribute).Name)) continue;
                 if (property.GetCustomAttributes(true).Any(attr => attr.GetType().Name == typeof(NotMappedAttribute).Name)) continue;
                 if (property.GetCustomAttributes(true).Any(attr => attr.GetType().Name == typeof(ReadOnlyAttribute).Name && IsReadOnly(property))) continue;
 
@@ -515,7 +771,7 @@ namespace JobHubAPI.Context
                     && property.GetCustomAttributes(true).Any(attr => attr.GetType().Name == typeof(KeyAttribute).Name)
                     && property.GetCustomAttributes(true).All(attr => attr.GetType().Name != typeof(RequiredAttribute).Name))
                     continue;
-                if (property.GetCustomAttributes(true).Any(attr => attr.GetType().Name == typeof(IgnoreInsertAttribute).Name || attr.GetType().Name == typeof(System.Attribute).Name)) continue;
+                if (property.GetCustomAttributes(true).Any(attr => attr.GetType().Name == typeof(IgnoreInsertAttribute).Name || attr.GetType().Name == typeof(IgnoreAllAttribute).Name)) continue;
                 if (property.GetCustomAttributes(true).Any(attr => attr.GetType().Name == typeof(NotMappedAttribute).Name)) continue;
 
                 if (property.GetCustomAttributes(true).Any(attr => attr.GetType().Name == typeof(ReadOnlyAttribute).Name && IsReadOnly(property))) continue;
@@ -594,7 +850,7 @@ namespace JobHubAPI.Context
             //remove ones that are readonly
             updateableProperties = updateableProperties.Where(p => p.GetCustomAttributes(true).Any(attr => (attr.GetType().Name == typeof(ReadOnlyAttribute).Name) && IsReadOnly(p)) == false);
             //remove ones with IgnoreUpdate attribute
-            updateableProperties = updateableProperties.Where(p => p.GetCustomAttributes(true).Any(attr => attr.GetType().Name == typeof(IgnoreUpdateAttribute).Name || attr.GetType().Name == typeof(System.Attribute).Name) == false);
+            updateableProperties = updateableProperties.Where(p => p.GetCustomAttributes(true).Any(attr => attr.GetType().Name == typeof(IgnoreUpdateAttribute).Name || attr.GetType().Name == typeof(IgnoreAllAttribute).Name) == false);
             //remove ones that are not mapped
             updateableProperties = updateableProperties.Where(p => p.GetCustomAttributes(true).Any(attr => attr.GetType().Name == typeof(NotMappedAttribute).Name) == false);
 
@@ -678,6 +934,37 @@ namespace JobHubAPI.Context
             bytes[4] = (byte)time.Second;
             return new Guid(bytes);
         }
+
+        public IEnumerable<QueryRequest> GetDependents<T>(object parameters = null)
+        {
+            var currenttype = typeof(T);
+            var depAtts = currenttype.GetProperties().Select(x =>
+            {
+                var z = x.GetCustomAttribute(typeof(DependentAttribute), false);
+                return z;
+            }).Where(y => y != null);
+            var multitblQuery = new StringBuilder();
+            foreach (DependentAttribute dependent in depAtts)
+            {
+                var type = dependent.Model;
+                var tblname = GetTableName(type);
+                var sb = new StringBuilder();
+                sb.Append("Select ");
+                sb.Append(dependent.Get);
+                sb.AppendFormat(" from {0}", tblname);
+                sb.Append(" " + dependent.Condition);
+                sb.Append(";");
+
+                yield return new QueryRequest { QuerySql = sb.ToString(), Parameters = parameters };
+
+                //multitblQuery.Append(sb);
+
+            }
+
+            //return new QueryRequest { QuerySql = multitblQuery.ToString(), Parameters = parameters };
+
+        }
+
 
     }
 }

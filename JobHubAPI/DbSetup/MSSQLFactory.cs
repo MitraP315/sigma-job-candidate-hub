@@ -68,6 +68,9 @@ namespace JobHubAPI.DbSetup
             Db.Dispose();
         }
 
+
+        public ILogger DbLogger { get; set; }
+
     }
 
 
