@@ -22,6 +22,7 @@ namespace JobHubAPI
         public void ConfigureServices(IServiceCollection services)
         {
 
+            services.AddMemoryCache();
             services.AddSingleton(Configuration);
             services.AddScoped<ICandidateServices, CandidateServices>(); // Assuming `CandidateServices` is the implementation
 
