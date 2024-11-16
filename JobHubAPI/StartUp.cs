@@ -22,13 +22,13 @@ namespace JobHubAPI
         public void ConfigureServices(IServiceCollection services)
         {
 
-            services.AddMemoryCache();
-            services.AddSingleton(Configuration);
-            services.AddScoped<ICandidateServices, CandidateServices>(); // Assuming `CandidateServices` is the implementation
 
             var serviceProvider = services.BuildServiceProvider();
             IDatabaseFactory dbFactory = DatabaseFactories.SetFactory(serviceProvider);
             services.AddSingleton(dbFactory);
+            services.AddMemoryCache();
+            services.AddSingleton(Configuration);
+            services.AddScoped<ICandidateServices, CandidateServices>(); // Assuming `CandidateServices` is the implementation
             services.AddControllers()
                 .AddJsonOptions(opt => opt.JsonSerializerOptions.PropertyNamingPolicy = null);
 
