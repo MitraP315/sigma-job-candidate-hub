@@ -1,6 +1,6 @@
 # sigma-job-candidate-hub
 
-#### 1 Clone the project to the local and checout to the dev brench
+#### 1 Clone the project to the local and checkout to the dev brench
 #### 2. Open the solution in Visual Studio.
 #### 3. Set up the database connection in `appsettings.json`.
 
