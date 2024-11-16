@@ -76,7 +76,7 @@ namespace JobHubAPI
             app.UseSwagger();
             app.UseSwaggerUI(c =>
             {
-                c.SwaggerEndpoint("/swagger/JobCandidateHub/swagger.json", "Online Class API v1");
+                c.SwaggerEndpoint("/swagger/JobCandidateHub/swagger.json", "Job Candidate Hub API v1");
             });
 
             app.UseEndpoints(endpoints =>

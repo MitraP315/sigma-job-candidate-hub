@@ -4,9 +4,6 @@ using JobHubAPI.Services;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
-using System;
-using System.Threading.Tasks;
-
 namespace JobHubAPI.Tests
 {
     [TestClass]
